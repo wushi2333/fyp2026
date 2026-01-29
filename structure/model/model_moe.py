@@ -4,9 +4,7 @@ import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from cnn import TemporalCNNFrontend 
 
-# ==========================================
-# 1. 带噪门控网络 (Switch Loss 版本)
-# ==========================================
+# 1. Noisy Gating Network
 class NoisyTopKRouter(nn.Module):
     def __init__(self, embed_dim, num_experts, top_k=2, noise_epsilon=0.2):
         super().__init__()
@@ -14,18 +12,18 @@ class NoisyTopKRouter(nn.Module):
         self.num_experts = num_experts
         self.noise_epsilon = noise_epsilon
         
-        # 门控权重
+        # Gate weights
         self.w_gate = nn.Parameter(torch.zeros(embed_dim, num_experts))
         self.w_noise = nn.Parameter(torch.zeros(embed_dim, num_experts))
         
-        # 初始化: 使用较大的 std 确保初始不平衡
+        # Initialization: use a larger std to ensure initial imbalance
         nn.init.normal_(self.w_gate, mean=0, std=1.0) 
         nn.init.normal_(self.w_noise, mean=0, std=1.0)
         
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(dim=-1)
         
-        # 调试标记
+        # Debug flag
         self.debug_printed = False
 
     def forward(self, x):
@@ -49,11 +47,11 @@ class NoisyTopKRouter(nn.Module):
         top_k_logits, indices = noisy_logits.topk(self.top_k, dim=-1)
         top_k_gates = self.softmax(top_k_logits)
         
-        # 4. 构建稀疏门控 (用于后续计算)
+        # 4. Construct sparse gates
         zeros = torch.zeros_like(noisy_logits, requires_grad=True)
         gates = zeros.scatter(-1, indices, top_k_gates)
         
-        # 5. === Switch Transformer Load Balancing Loss ===
+        # 5. Switch Transformer Load Balancing Loss
         # loss = N * sum(P_i * f_i)
         # P_i: expert_prob (softmax of clean_logits, summed over batch)
         # f_i: expert_freq (fraction of tokens dispatched to expert i)
@@ -61,13 +59,13 @@ class NoisyTopKRouter(nn.Module):
         # (B*S, E)
         probs = self.softmax(clean_logits).reshape(-1, self.num_experts)
         
-        # 哪些专家被选中了? (B*S, E) - One-hot like
-        # 简化计算 f_i: 直接用 gates > 0 来近似 f_i
+        #  (B*S, E) - One-hot like
+        # Simplified calculation of f_i: directly use gates > 0 to approximate f_i
         
-        # P_i: 每个专家获得的概率总和 / 总Token数
+        # P_i: sum of probabilities for each expert / total number of tokens
         P = probs.mean(0) 
         
-        # f_i: 每个专家被选中的频率 (基于 Gate 是否非零)
+        # f_i: frequency of each expert being selected (based on whether the gate is non-zero)
         # gates: (B, S, E)
         has_token = (gates > 0).float().reshape(-1, self.num_experts)
         f = has_token.mean(0)
@@ -75,7 +73,7 @@ class NoisyTopKRouter(nn.Module):
         # Switch Loss
         aux_loss = self.num_experts * torch.sum(P * f)
         
-        # === 调试打印 (只打印一次) ===
+        # Debug print
         if self.training and not self.debug_printed:
             print(f"\n[DEBUG Router] Logits Mean: {clean_logits.mean().item():.4f}, Std: {clean_logits.std().item():.4f}")
             print(f"[DEBUG Router] Prob dist (P): {P.detach().cpu().numpy()}")
@@ -152,7 +150,7 @@ class Model_MoE_Final(nn.Module):
         return self.cls_head(x), total_aux_loss
 
     def load_from_model_a(self, checkpoint_path):
-        print(f"🔄 正在从 {checkpoint_path} 初始化 MoE 模型...")
+        print(f"Initializing MoE model from {checkpoint_path}...")
         checkpoint = torch.load(checkpoint_path)
         if 'frontend' in checkpoint: self.frontend.load_state_dict(checkpoint['frontend'])
         if 'encoder' in checkpoint:
@@ -175,6 +173,6 @@ class Model_MoE_Final(nn.Module):
                 for expert in self.layers[i].experts:
                     expert.load_state_dict(shared_dict)
                     with torch.no_grad():
-                        # === 差异化初始化 ===
+                        # === Differentiated initialization ===
                         for p in expert.parameters(): p.add_(torch.randn_like(p) * 0.1)
-        print(" -> ✅ MoE 初始化完成 (Debug Mode)")
+        print(" -> MoE initialization complete (Debug Mode)")

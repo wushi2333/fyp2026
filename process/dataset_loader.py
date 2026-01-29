@@ -10,22 +10,20 @@ class UniversalEEGDataset(Dataset):
         self.mode = mode
         self.augment = augment
         
-        # S&R 参数
+        # S&R parameters
         self.snr_aug = snr_aug and (mode == 'train')
         self.snr_prob = snr_prob
         self.num_segments = num_segments
         
-        # === 内存优化存储结构 ===
-        # 不再使用 self.X = np.concatenate(...)
-        # 而是保留碎片化的列表，避免内存峰值
+        #Keep a list of fragments to avoid memory spikes
         self.X_chunks = [] 
         self.y_chunks = []
         self.chunk_sizes = []
         self.cumulative_sizes = []
         
         target_file = 'train_data.npy' if mode == 'train' else 'test_data.npy'
-        print(f"[{mode.upper()}] 正在扫描数据 (目标: {target_dataset})...")
-        print(f" -> 提示: 启用了内存优化模式 (List-based storage)")
+        print(f"[{mode.upper()}] Scanning data (Target: {target_dataset})...")
+        print(f" -> Tip: Memory optimization mode enabled (List-based storage)")
         
         total_samples = 0
         loaded_files = 0
@@ -37,16 +35,16 @@ class UniversalEEGDataset(Dataset):
             if target_file in files:
                 file_path = os.path.join(root, target_file)
                 try:
-                    # 加载数据
+                    # Load data
                     data = np.load(file_path, allow_pickle=True).item()
                     X_part = data['X']
                     y_part = data['y']
                     
-                    # === 关键优化 1: 立即转为 float32 节省一半内存 ===
+                    # Immediately convert to float32 to save half the memory
                     if X_part.dtype != np.float32:
                         X_part = X_part.astype(np.float32)
                         
-                    # === 关键优化 2: 存储碎片，不合并 ===
+                    # Store fragments, do not merge
                     self.X_chunks.append(X_part)
                     self.y_chunks.append(torch.from_numpy(y_part).long())
                     
@@ -55,41 +53,39 @@ class UniversalEEGDataset(Dataset):
                     total_samples += count
                     loaded_files += 1
                     
-                    # 打印进度防止以为卡死
+                    # Print progress to prevent freezing
                     if loaded_files % 10 == 0:
-                        print(f"    ...已加载 {loaded_files} 个文件 ({total_samples} 样本)")
+                        print(f"    ...Loaded {loaded_files} files ({total_samples} samples)")
                         
                 except Exception as e:
-                    print(f"❌ 加载失败 {file_path}: {e}")
+                    print(f"Failed to load {file_path}: {e}")
 
-        # 构建累积索引，用于快速定位
+        # Build a cumulative index for quick positioning
         self.cumulative_sizes = np.cumsum(self.chunk_sizes)
         self.total_len = total_samples
         
         if total_samples > 0:
-            print(f" -> ✅ 加载完成: {loaded_files} 文件, 共 {total_samples} 样本")
+            print(f" -> Loading complete: {loaded_files} files, {total_samples} samples in total")
             
-            # === S&R 索引构建 (优化版) ===
+            # S&R index construction
             if self.snr_aug:
-                print(" -> 构建 S&R 全局索引 (这可能需要几秒钟)...")
-                # 为了支持跨 chunk 的 S&R，我们需要一个全局的 label map
-                # 这会消耗一些内存，但对于 S&R 是必须的
-                self.global_labels = torch.cat(self.y_chunks) # 这个比较小，可以合并
+                print(" -> Building S&R global index (this may take a few seconds)...")
+                self.global_labels = torch.cat(self.y_chunks) 
                 self.class_indices = {}
                 unique_labels = torch.unique(self.global_labels).numpy()
                 for label in unique_labels:
                     self.class_indices[label] = (self.global_labels == label).nonzero(as_tuple=True)[0]
-                print(" -> S&R 索引构建完成")
+                print(" -> S&R index construction complete")
         else:
-            print(f"❌ 警告: 未找到任何数据!")
+            print(f"Warning: No data found!")
 
     def __len__(self):
         return self.total_len
 
     def _get_chunk_index(self, global_idx):
         """
-        根据全局索引找到 (Chunk索引, Chunk内偏移量)
-        使用二分查找加速
+        Find (Chunk index, offset within Chunk) based on global index
+        Use binary search to speed up
         """
         chunk_idx = bisect.bisect_right(self.cumulative_sizes, global_idx)
         if chunk_idx == 0:
@@ -100,15 +96,13 @@ class UniversalEEGDataset(Dataset):
 
     def _get_data_at(self, global_idx):
         chunk_idx, local_idx = self._get_chunk_index(global_idx)
-        # 此时才将 Numpy 转为 Tensor，减少常驻内存开销
+        # Convert Numpy to Tensor only at this time to reduce resident memory overhead
         x = torch.from_numpy(self.X_chunks[chunk_idx][local_idx])
         y = self.y_chunks[chunk_idx][local_idx]
         return x, y
 
     def _apply_snr(self, x_current, y_current):
-        """
-        优化版 S&R: 支持跨 Chunk 抽取
-        """
+
         label = y_current.item()
         candidates = self.class_indices[label]
         
@@ -120,13 +114,13 @@ class UniversalEEGDataset(Dataset):
             start = i * segment_len
             end = start + segment_len if i < self.num_segments - 1 else n_time
             
-            # 随机选择一个全局索引
+            # Randomly select a global index
             random_global_idx = candidates[torch.randint(0, len(candidates), (1,)).item()].item()
             
-            # 获取源样本 (需要跨 Chunk 查找)
+            # Get the source sample
             chunk_idx, local_idx = self._get_chunk_index(random_global_idx)
             x_source_np = self.X_chunks[chunk_idx][local_idx]
-            # 临时转 Tensor
+            # Temporarily convert to Tensor
             x_source = torch.from_numpy(x_source_np)
             
             x_new[:, start:end, :] = x_source[:, start:end, :]

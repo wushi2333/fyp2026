@@ -6,11 +6,11 @@ from torch.utils.data import DataLoader
 import os
 import sys
 import numpy as np
-import pandas as pd  # 新增：用于保存 CSV 表格
-import matplotlib.pyplot as plt # 新增：用于画图
+import pandas as pd  
+import matplotlib.pyplot as plt
 from sklearn.metrics import cohen_kappa_score, f1_score, accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 
-# ================= 路径配置 =================
+# Path configuration
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 structure_path = os.path.join(project_root, 'structure')
@@ -19,14 +19,13 @@ model_path = os.path.join(structure_path, 'model')
 if structure_path not in sys.path: sys.path.append(structure_path)
 if model_path not in sys.path: sys.path.append(model_path)
 
-# === 新增：结果输出路径 ===
-RESULT_DIR = r"C:\Users\巫逝\Desktop\学习\大四\毕设\code\result"
+# Result output path
+RESULT_DIR = r"C:\Users\巫逝\Desktop\学习\大四\毕设\code\final_year_project\result"
 if not os.path.exists(RESULT_DIR):
     os.makedirs(RESULT_DIR)
-    print(f"📁 已创建结果文件夹: {RESULT_DIR}")
+    print(f"Result folder created: {RESULT_DIR}")
 else:
-    print(f"📁 结果将保存至: {RESULT_DIR}")
-# ===========================================
+    print(f"Results will be saved to: {RESULT_DIR}")
 
 from dataset_loader import UniversalEEGDataset
 from model_moe import Model_MoE_Final
@@ -45,7 +44,6 @@ CONFIG = {
     'subjects': ['A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08', 'A09']
 }
 
-# === Label Smoothing Loss ===
 class LabelSmoothingLoss(nn.Module):
     def __init__(self, classes, smoothing=0.1, dim=-1):
         super(LabelSmoothingLoss, self).__init__()
@@ -86,7 +84,7 @@ def load_pretrained_weights(model, path):
     return False
 
 def train_individual_subject(subject_id):
-    print(f"\n⚡ 正在微调受试者: {subject_id}")
+    print(f"\nFine-tuning subject: {subject_id}")
     
     train_dataset = UniversalEEGDataset(
         CONFIG['data_root'], mode='train', augment=True, target_dataset=subject_id,
@@ -145,7 +143,7 @@ def train_individual_subject(subject_id):
                 if y.max() > 1: y = torch.where(y == y.min(), torch.tensor(0).to(y.device), torch.tensor(1).to(y.device))
                 
                 tta_logits = []
-                for _ in range(7): # 降低一点TTA次数以加快速度，如需极限精度可改回9
+                for _ in range(7): # Reduce the number of TTAs to speed up, can be changed back to 9 if extreme accuracy is needed
                     logits, _ = model(x)
                     tta_logits.append(logits)
                 
@@ -164,10 +162,10 @@ def train_individual_subject(subject_id):
             best_metrics['preds'] = epoch_preds
             best_metrics['targets'] = epoch_targets
 
-    # === 保存详细结果到文件夹 ===
-    print(f"✅ {subject_id} 最佳准确率: {best_metrics['acc']:.2f}% | 保存结果中...")
+    # Save detailed results to folder
+    print(f"{subject_id} best accuracy: {best_metrics['acc']:.2f}% | Saving results...")
     
-    # 1. 保存 真实值 vs 预测值 表格
+    # 1. Save true value vs predicted value table
     df_pred = pd.DataFrame({
         'Sample_Index': range(len(best_metrics['targets'])),
         'True_Label': best_metrics['targets'],
@@ -177,7 +175,7 @@ def train_individual_subject(subject_id):
     csv_path = os.path.join(RESULT_DIR, f"{subject_id}_predictions.csv")
     df_pred.to_csv(csv_path, index=False)
     
-    # 2. 绘制并保存 混淆矩阵图
+    # 2. Plot and save confusion matrix
     cm = confusion_matrix(best_metrics['targets'], best_metrics['preds'])
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Class 0', 'Class 1'])
     
@@ -186,40 +184,40 @@ def train_individual_subject(subject_id):
     plt.title(f'Confusion Matrix - {subject_id}\nAcc: {best_metrics["acc"]:.2f}%')
     cm_path = os.path.join(RESULT_DIR, f"{subject_id}_confusion_matrix.png")
     plt.savefig(cm_path)
-    plt.close(fig) # 关闭图像防止内存泄漏
+    plt.close(fig) # Close the image to prevent memory leaks
 
     return best_metrics
 
 def main():
     results = []
-    print(f"🚀 开始 Subject-Specific 训练，结果将保存至: {RESULT_DIR}")
+    print(f"Starting Subject-Specific training, results will be saved to: {RESULT_DIR}")
     
     for subj in CONFIG['subjects']:
         res = train_individual_subject(subj)
-        # 移除详细列表数据，只保留指标用于汇总
+        # Remove detailed list data, only keep indicators for summary
         summary_res = {k: v for k, v in res.items() if k not in ['preds', 'targets']}
         results.append(summary_res)
     
-    # === 最终汇总 ===
+    # Final summary
     print("\n" + "="*60)
-    print("🏆 最终结果汇总")
+    print("Final Result Summary")
     print("="*60)
     
     df_summary = pd.DataFrame(results)
     
-    # 计算平均值行
+    # Calculate average row
     avg_row = df_summary[['acc', 'kappa', 'f1']].mean().to_dict()
     avg_row['subject'] = 'AVERAGE'
     df_summary = pd.concat([df_summary, pd.DataFrame([avg_row])], ignore_index=True)
     
-    # 打印到控制台
+    # Print to console
     print(df_summary.to_string(index=False, float_format="%.4f"))
     
-    # 保存汇总 CSV
+    # Save summary CSV
     summary_path = os.path.join(RESULT_DIR, "final_summary_metrics.csv")
     df_summary.to_csv(summary_path, index=False)
-    print(f"\n📄 汇总结果已保存至: {summary_path}")
-    print(f"📄 详细预测表和混淆矩阵已保存至: {RESULT_DIR}")
+    print(f"\nSummary results saved to: {summary_path}")
+    print(f"Detailed prediction tables and confusion matrices saved to: {RESULT_DIR}")
     print("="*60)
 
 if __name__ == "__main__":
