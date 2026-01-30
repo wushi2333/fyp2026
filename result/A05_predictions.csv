@@ -3,7 +3,7 @@ Sample_Index,True_Label,Predicted_Label,Correct
 1,1,0,False
 2,0,0,True
 3,0,0,True
-4,0,0,True
+4,0,1,False
 5,0,0,True
 6,0,0,True
 7,0,0,True
@@ -22,9 +22,9 @@ Sample_Index,True_Label,Predicted_Label,Correct
 20,0,0,True
 21,1,1,True
 22,1,1,True
-23,1,0,False
+23,1,1,True
 24,1,1,True
 25,1,0,False
 26,0,0,True
 27,1,1,True
-28,0,0,True
+28,0,1,False
