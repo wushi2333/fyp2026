@@ -75,10 +75,10 @@ class NoisyTopKRouter(nn.Module):
         
         # Debug print
         if self.training and not self.debug_printed:
-            print(f"\n[DEBUG Router] Logits Mean: {clean_logits.mean().item():.4f}, Std: {clean_logits.std().item():.4f}")
-            print(f"[DEBUG Router] Prob dist (P): {P.detach().cpu().numpy()}")
-            print(f"[DEBUG Router] Freq dist (f): {f.detach().cpu().numpy()}")
-            print(f"[DEBUG Router] Aux Loss: {aux_loss.item():.4f}")
+            # print(f"\n[DEBUG Router] Logits Mean: {clean_logits.mean().item():.4f}, Std: {clean_logits.std().item():.4f}")
+            # print(f"[DEBUG Router] Prob dist (P): {P.detach().cpu().numpy()}")
+            # print(f"[DEBUG Router] Freq dist (f): {f.detach().cpu().numpy()}")
+            # print(f"[DEBUG Router] Aux Loss: {aux_loss.item():.4f}")
             self.debug_printed = True
 
         return gates, aux_loss

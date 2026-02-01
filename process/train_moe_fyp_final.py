@@ -10,7 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import cohen_kappa_score, f1_score, accuracy_score, confusion_matrix, ConfusionMatrixDisplay
 
-# Path configuration
+# 0. Basic configuration and path settings
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 structure_path = os.path.join(project_root, 'structure')
@@ -19,20 +19,32 @@ model_path = os.path.join(structure_path, 'model')
 if structure_path not in sys.path: sys.path.append(structure_path)
 if model_path not in sys.path: sys.path.append(model_path)
 
-# Result output path
-RESULT_DIR = r"C:\Users\巫逝\Desktop\学习\大四\毕设\code\final_year_project\result"
+# Switch: whether to use transfer learning
+# Modify here to control the experiment mode
+ENABLE_TRANSFER_LEARNING = False 
+
+# Dynamically set result output path
+BASE_RESULT_DIR = r"C:\Users\巫逝\Desktop\学习\大四\毕设\code\final_year_project\result"
+
+if ENABLE_TRANSFER_LEARNING:
+    RESULT_DIR = os.path.join(BASE_RESULT_DIR, "with_transfer")
+    print(f"\n[Mode] Transfer Learning: ON")
+else:
+    RESULT_DIR = os.path.join(BASE_RESULT_DIR, "no_transfer")
+    print(f"\n[Mode] Transfer Learning: OFF")
+
 if not os.path.exists(RESULT_DIR):
     os.makedirs(RESULT_DIR)
-    print(f"Result folder created: {RESULT_DIR}")
+    print(f"Created result directory: {RESULT_DIR}")
 else:
     print(f"Results will be saved to: {RESULT_DIR}")
 
 from dataset_loader import UniversalEEGDataset
-from model_moe import Model_MoE_Final
+from final_year_project.structure.model.model_fbcsp_no_cnn import Model_MoE_FBCSP
 
 CONFIG = {
     'data_root': r"D:\fyp\dataset_processed_fbcsp_all",
-    'pretrained_path': r"checkpoints_final/model_a_fscfp_2_best.pth",
+    'pretrained_path': r"checkpoints_final/model_a_fbcsp_best.pth",
     'batch_size': 16,     
     'lr': 0.0001,
     'epochs': 80,         
@@ -61,25 +73,69 @@ class LabelSmoothingLoss(nn.Module):
         return torch.mean(torch.sum(-true_dist * pred, dim=self.dim))
 
 def load_pretrained_weights(model, path):
-    if os.path.exists(path):
-        checkpoint = torch.load(path)
-        if 'frontend' in checkpoint:
-            model.frontend.load_state_dict(checkpoint['frontend'])
-        if 'encoder' in checkpoint:
-            src_state = checkpoint['encoder']
-            for i in range(4): 
-                prefix_src = f"layers.{i}."
-                for suffix in ['in_proj_weight', 'in_proj_bias', 'out_proj.weight', 'out_proj.bias']:
-                    src_key = f"{prefix_src}self_attn.{suffix}"
-                    if src_key in src_state:
-                        if suffix == 'in_proj_weight': model.layers[i].attn.in_proj_weight.data = src_state[src_key].data
-                        if suffix == 'in_proj_bias': model.layers[i].attn.in_proj_bias.data = src_state[src_key].data
-                        if suffix == 'out_proj.weight': model.layers[i].attn.out_proj.weight.data = src_state[src_key].data
-                        if suffix == 'out_proj.bias': model.layers[i].attn.out_proj.bias.data = src_state[src_key].data
-                model.layers[i].norm1.weight.data = src_state[f"{prefix_src}norm1.weight"].data
-                model.layers[i].norm1.bias.data = src_state[f"{prefix_src}norm1.bias"].data
-                model.layers[i].norm2.weight.data = src_state[f"{prefix_src}norm2.weight"].data
-                model.layers[i].norm2.bias.data = src_state[f"{prefix_src}norm2.bias"].data
+    """
+    Weight loading function specifically adapted for the FBCSP No-CNN architecture.
+    """
+    if not os.path.exists(path):
+        print(f"Warning: Pretrained weights not found at {path}. Training from scratch.")
+        return False
+
+    print(f"Loading weights from {path}...")
+    checkpoint = torch.load(path)
+    
+    # 1. Load frontend (Linear Projection + Pos Embed)
+    if 'frontend' in checkpoint:
+        model.frontend.load_state_dict(checkpoint['frontend'], strict=True)
+        print(" -> Frontend weights loaded.")
+
+    # 2. Load encoder weights into MoE layers (partial load)
+    if 'encoder' in checkpoint:
+        src_state = checkpoint['encoder']
+        loaded_layers = 0
+        for i in range(len(model.layers)): 
+            prefix_src = f"layers.{i}."
+            
+            # Load Attention
+            model.layers[i].attn.load_state_dict({
+                'in_proj_weight': src_state[f"{prefix_src}self_attn.in_proj_weight"],
+                'in_proj_bias': src_state[f"{prefix_src}self_attn.in_proj_bias"],
+                'out_proj.weight': src_state[f"{prefix_src}self_attn.out_proj.weight"],
+                'out_proj.bias': src_state[f"{prefix_src}self_attn.out_proj.bias"]
+            })
+            
+            # Load LayerNorms
+            model.layers[i].norm1.load_state_dict({
+                'weight': src_state[f"{prefix_src}norm1.weight"],
+                'bias': src_state[f"{prefix_src}norm1.bias"]
+            })
+            model.layers[i].norm2.load_state_dict({
+                'weight': src_state[f"{prefix_src}norm2.weight"],
+                'bias': src_state[f"{prefix_src}norm2.bias"]
+            })
+            
+            # Load FFN into Shared Expert
+            model.layers[i].shared_expert.load_state_dict({
+                '0.weight': src_state[f"{prefix_src}linear1.weight"],
+                '0.bias': src_state[f"{prefix_src}linear1.bias"],
+                '2.weight': src_state[f"{prefix_src}linear2.weight"],
+                '2.bias': src_state[f"{prefix_src}linear2.bias"]
+            })
+            
+            # Initialize Sparse Experts (hot-start using Shared Expert weights)
+            for expert in model.layers[i].experts:
+                expert.load_state_dict({
+                    '0.weight': src_state[f"{prefix_src}linear1.weight"],
+                    '0.bias': src_state[f"{prefix_src}linear1.bias"],
+                    '2.weight': src_state[f"{prefix_src}linear2.weight"],
+                    '2.bias': src_state[f"{prefix_src}linear2.bias"]
+                })
+                # Add small noise to break symmetry
+                with torch.no_grad():
+                    for p in expert.parameters():
+                        p.add_(torch.randn_like(p) * 0.01)
+
+            loaded_layers += 1
+        print(f" -> Encoder weights transferred to {loaded_layers} MoE layers.")
         return True
     return False
 
@@ -98,12 +154,19 @@ def train_individual_subject(subject_id):
     train_loader = DataLoader(train_dataset, batch_size=CONFIG['batch_size'], shuffle=True, drop_last=True, num_workers=0, pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=CONFIG['batch_size'], shuffle=False, num_workers=0, pin_memory=True)
 
-    model = Model_MoE_Final(
+    # Instantiate FBCSP (No-CNN) model
+    model = Model_MoE_FBCSP(
         n_classes=2, n_bands=CONFIG['n_bands'], n_csp=8, time_steps=512,
         embed_dim=128, depth=4, heads=8, num_experts=8, top_k=2, dropout=0.5 
     ).to(CONFIG['device'])
     
-    load_pretrained_weights(model, CONFIG['pretrained_path'])
+    # Transfer learning control logic
+    if ENABLE_TRANSFER_LEARNING:
+        success = load_pretrained_weights(model, CONFIG['pretrained_path'])
+        if not success:
+            print(" -> Transfer learning enabled but weights failed to load. Proceeding with random init.")
+    else:
+        print(" -> Transfer learning DISABLED. Training from scratch.")
     
     optimizer = optim.AdamW([
         {'params': model.frontend.parameters(), 'lr': CONFIG['lr'] * 0.1}, 
@@ -132,8 +195,8 @@ def train_individual_subject(subject_id):
         
         scheduler.step()
             
-        # Evaluation
-        model.train() # TTA Mode
+        # Evaluation with TTA
+        model.eval() 
         epoch_preds = []
         epoch_targets = []
         
@@ -143,7 +206,7 @@ def train_individual_subject(subject_id):
                 if y.max() > 1: y = torch.where(y == y.min(), torch.tensor(0).to(y.device), torch.tensor(1).to(y.device))
                 
                 tta_logits = []
-                for _ in range(7): # Reduce the number of TTAs to speed up, can be changed back to 9 if extreme accuracy is needed
+                for _ in range(7): 
                     logits, _ = model(x)
                     tta_logits.append(logits)
                 
@@ -162,10 +225,9 @@ def train_individual_subject(subject_id):
             best_metrics['preds'] = epoch_preds
             best_metrics['targets'] = epoch_targets
 
-    # Save detailed results to folder
-    print(f"{subject_id} best accuracy: {best_metrics['acc']:.2f}% | Saving results...")
+    print(f"{subject_id} best accuracy: {best_metrics['acc']:.2f}% | Saving results to {RESULT_DIR}...")
     
-    # 1. Save true value vs predicted value table
+    # Save results (CSV + Image)
     df_pred = pd.DataFrame({
         'Sample_Index': range(len(best_metrics['targets'])),
         'True_Label': best_metrics['targets'],
@@ -175,7 +237,6 @@ def train_individual_subject(subject_id):
     csv_path = os.path.join(RESULT_DIR, f"{subject_id}_predictions.csv")
     df_pred.to_csv(csv_path, index=False)
     
-    # 2. Plot and save confusion matrix
     cm = confusion_matrix(best_metrics['targets'], best_metrics['preds'])
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Class 0', 'Class 1'])
     
@@ -184,21 +245,21 @@ def train_individual_subject(subject_id):
     plt.title(f'Confusion Matrix - {subject_id}\nAcc: {best_metrics["acc"]:.2f}%')
     cm_path = os.path.join(RESULT_DIR, f"{subject_id}_confusion_matrix.png")
     plt.savefig(cm_path)
-    plt.close(fig) # Close the image to prevent memory leaks
+    plt.close(fig) 
 
     return best_metrics
 
 def main():
     results = []
-    print(f"Starting Subject-Specific training, results will be saved to: {RESULT_DIR}")
+    print(f"Starting Subject-Specific training")
+    print(f"Transfer Learning: {ENABLE_TRANSFER_LEARNING}")
+    print(f"Output Directory: {RESULT_DIR}")
     
     for subj in CONFIG['subjects']:
         res = train_individual_subject(subj)
-        # Remove detailed list data, only keep indicators for summary
         summary_res = {k: v for k, v in res.items() if k not in ['preds', 'targets']}
         results.append(summary_res)
     
-    # Final summary
     print("\n" + "="*60)
     print("Final Result Summary")
     print("="*60)
@@ -206,19 +267,16 @@ def main():
     df_summary = pd.DataFrame(results)
     
     # Calculate average row
-    avg_row = df_summary[['acc', 'kappa', 'f1']].mean().to_dict()
-    avg_row['subject'] = 'AVERAGE'
-    df_summary = pd.concat([df_summary, pd.DataFrame([avg_row])], ignore_index=True)
+    if not df_summary.empty:
+        avg_row = df_summary[['acc', 'kappa', 'f1']].mean().to_dict()
+        avg_row['subject'] = 'AVERAGE'
+        df_summary = pd.concat([df_summary, pd.DataFrame([avg_row])], ignore_index=True)
     
-    # Print to console
     print(df_summary.to_string(index=False, float_format="%.4f"))
     
-    # Save summary CSV
     summary_path = os.path.join(RESULT_DIR, "final_summary_metrics.csv")
     df_summary.to_csv(summary_path, index=False)
     print(f"\nSummary results saved to: {summary_path}")
-    print(f"Detailed prediction tables and confusion matrices saved to: {RESULT_DIR}")
-    print("="*60)
 
 if __name__ == "__main__":
     main()

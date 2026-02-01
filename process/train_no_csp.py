@@ -20,9 +20,7 @@ sys.path.append(model_path)
 from dataset_loader import UniversalEEGDataset
 from model_no_csp import ModelA_NoCSP_Pretrain, Model_MoE_NoCSP_Final
 
-# --- CONTROL SWITCH ---
 ENABLE_TRANSFER_LEARNING = False  # Set False to train MoE from scratch
-# ----------------------
 
 if ENABLE_TRANSFER_LEARNING:
     experiment_name = 'no_csp_transfer_learning'
