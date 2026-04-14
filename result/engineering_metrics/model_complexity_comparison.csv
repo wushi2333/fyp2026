@@ -1,0 +1,4 @@
+Model_Architecture,Parameters,FLOPs,Latency_NoTTA_ms,Latency_TTA7_ms,Real-Time Capability
+Proposed (Linear + MoE),2.69M,1.37G,7.03,53.73,Pass
+Baseline (CNN Only),87.99K,4.64M,0.53,3.42,Pass
+Standard CNN + MoE,6.49M,414.03M,10.74,70.76,Pass

@@ -127,14 +127,14 @@ def run_single_experiment(exp_key):
     os.makedirs(save_dir, exist_ok=True)
     
     print(f"\n{'='*60}")
-    print(f"Running Experiment: {cfg['desc']}")
-    print(f"Output Directory: {save_dir}")
+    print(f"\nTraining Experiment: {cfg['desc']}")
+    print(f"Results Directory: {save_dir}")
     print(f"{'='*60}")
     
     results_summary = []
     
     for subject_id in CONFIG['subjects']:
-        print(f"\nTraining Subject: {subject_id} ...")
+        print(f"\nPlease wait for {subject_id} training...")
         
         # 1. Data loading
         train_dataset = UniversalEEGDataset(
@@ -214,7 +214,7 @@ def run_single_experiment(exp_key):
                 best_metrics['preds'] = epoch_preds
                 best_metrics['targets'] = epoch_targets
         
-        print(f" -> Best Acc: {best_metrics['acc']:.2f}%")
+        print(f" -> Best Accuracy: {best_metrics['acc']:.2f}%")
         
         # 6. Save detailed results for this subject
         save_results(subject_id, best_metrics, save_dir)
@@ -237,7 +237,7 @@ def run_single_experiment(exp_key):
     summary_path = os.path.join(save_dir, "final_summary_metrics.csv")
     df_summary.to_csv(summary_path, index=False)
     
-    print(f"\nExperiment '{exp_key}' Completed.")
+    print(f"\nExperiment '{exp_key}' completed.")
     print(f"Summary saved to: {summary_path}")
     print(df_summary.to_string(index=False, float_format="%.4f"))
 

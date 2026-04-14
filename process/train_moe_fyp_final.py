@@ -157,7 +157,7 @@ def train_individual_subject(subject_id):
     # Instantiate FBCSP (No-CNN) model
     model = Model_MoE_FBCSP(
         n_classes=2, n_bands=CONFIG['n_bands'], n_csp=8, time_steps=512,
-        embed_dim=128, depth=4, heads=8, num_experts=8, top_k=2, dropout=0.5 
+        embed_dim=128, depth=4, heads=8, num_experts=4, top_k=2, dropout=0.5 
     ).to(CONFIG['device'])
     
     # Transfer learning control logic

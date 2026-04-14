@@ -171,7 +171,7 @@ class Model_MoE_NoCSP_Final(nn.Module):
     Final MoE Model for No-CSP data
     """
     def __init__(self, n_classes=2, n_bands=55, n_channels=22, time_steps=512, embed_dim=128, 
-                 depth=4, heads=8, num_experts=8, top_k=2, dropout=0.5):
+                 depth=4, heads=8, num_experts=4, top_k=2, dropout=0.5):
         super().__init__()
         self.frontend = TemporalCNNFrontend_NoCSP(n_bands, n_channels, time_steps, embed_dim)
         self.layers = nn.ModuleList([

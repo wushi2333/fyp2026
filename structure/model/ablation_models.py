@@ -7,7 +7,7 @@ from model_moe import MoETransformerBlock, NoisyTopKRouter
 # Verify the necessity of the CNN frontend in extracting temporal features and reducing noise
 class Ablation_NoCNN_MoE(nn.Module):
     def __init__(self, n_bands=55, n_csp=8, time_steps=512, embed_dim=128, 
-                 depth=4, heads=8, num_experts=8, top_k=2, dropout=0.5):
+                 depth=4, heads=8, num_experts=4, top_k=2, dropout=0.5):
         super().__init__()
         self.input_dim = n_bands * n_csp
         
@@ -80,7 +80,7 @@ class StandardCNNFrontend(nn.Module):
 
 class Ablation_StandardCNN_MoE(nn.Module):
     def __init__(self, n_bands=55, n_csp=8, time_steps=512, embed_dim=128, 
-                 depth=4, heads=8, num_experts=8, top_k=2, dropout=0.5):
+                 depth=4, heads=8, num_experts=4, top_k=2, dropout=0.5):
         super().__init__()
         # Replace frontend
         self.frontend = StandardCNNFrontend(n_bands, n_csp, time_steps, embed_dim)

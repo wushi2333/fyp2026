@@ -144,7 +144,6 @@ def train_supervised_pretrain():
         # Save best weights
         if val_acc > best_acc:
             best_acc = val_acc
-            # We only need to save the frontend and encoder for MoE
             torch.save({
                 'frontend': model.frontend.state_dict(),
                 'encoder': model.encoder.state_dict()

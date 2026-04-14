@@ -1,0 +1,4 @@
+Model_Architecture,Latency_NoTTA_ms,Latency_TTA7_ms
+Proposed (Linear + MoE),7.03,53.73
+Baseline (CNN Only),0.53,3.42
+Standard CNN + MoE,10.74,70.76
